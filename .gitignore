@@ -4,12 +4,14 @@ venv/
 # Ignore test files and output folders
 reports/
 stripped/
+build/
 cleaned_output/
 dummymkv/
 dist/
 *.mkv
 *.mp4
 *.srt
+*.spec
 
 # Ignore Python cache
 __pycache__/
