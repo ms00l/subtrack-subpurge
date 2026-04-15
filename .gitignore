@@ -1,0 +1,15 @@
+# Ignore virtual environments
+venv/
+
+# Ignore test files and output folders
+reports/
+stripped/
+cleaned_output/
+dummymkv/
+*.mkv
+*.mp4
+*.srt
+
+# Ignore Python cache
+__pycache__/
+*.pyc
