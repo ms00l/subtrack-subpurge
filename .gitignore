@@ -6,6 +6,7 @@ reports/
 stripped/
 cleaned_output/
 dummymkv/
+dist/
 *.mkv
 *.mp4
 *.srt

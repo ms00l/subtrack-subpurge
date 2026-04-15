@@ -10,7 +10,7 @@ import sv_ttk
 class SubpurgeApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Subpurge - MKV Batch Cleaner")
+        self.root.title("Subtrack-Subpurge - MKV Batch Cleaner")
         self.root.geometry("900x750") # Slightly taller to fit the new row
         self.root.minsize(750, 600)
 
