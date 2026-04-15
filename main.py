@@ -77,8 +77,11 @@ class SubpurgeApp:
         self.clean_btn = ttk.Button(controls_frame, text="2. Run Subpurge (Clean)", command=self.start_clean, state=tk.DISABLED, cursor="hand2")
         self.clean_btn.pack(side=tk.LEFT)
 
+        self.clear_btn = ttk.Button(controls_frame, text="Clear Log", command=self.clear_log, cursor="hand2")
+        self.clear_btn.pack(side=tk.RIGHT)
+
         # --- Console Output ---
-        log_frame = ttk.LabelFrame(main_frame, text="Live Activity Log", padding="10")
+        log_frame = ttk.LabelFrame(main_frame, text="Console Log", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.console = scrolledtext.ScrolledText(
@@ -113,6 +116,13 @@ class SubpurgeApp:
             self.console.see(tk.END)
             self.console.config(state=tk.DISABLED)
         self.root.after(0, update_text)
+
+    # function for clearing console log
+    def clear_log(self):
+        self.console.config(state=tk.NORMAL)
+        self.console.delete(1.0, tk.END)
+        self.console.config(state=tk.DISABLED)
+        self.log("Log cleared.\n" + "-" * 60 + "\n")
 
     # --- SCANNING ---
     def start_scan(self):
