@@ -43,3 +43,15 @@ Launch the application from your terminal:
 
 ## ⚠️ Disclaimer
 While Subtrack-Subpurge is designed to be non-destructive by outputting to a new folder, always test batch automation tools on a small sample folder before pointing them at your entire media server!
+
+## 📝 Changelog
+
+### v1.2.0 (Current)
+* **OS-Aware Pathing:** Added dynamic path detection so Subtrack-Subpurge automatically finds the correct `mkvmerge` directory whether running on Linux or Windows.
+* **Verbose Error Handling:** Un-hid the background exception blocks. If a file fails to process, the log now prints the exact system error instead of a generic failure message.
+* **Interactive Review Queue:** Replaced the text-file queue with a tabbed GUI interface. Users can now visually review flagged files and use checkboxes `[X]` to include or exclude specific movies before purging.
+* **Progress Bar Tracking:** Added a visual progress bar that tracks both the scanning and cleaning phases in real-time.
+* **Emergency Stop / Cancel:** Added a cancellation event thread. Users can now safely abort the scanning or purging process mid-execution without corrupting files.
+
+### v1.1.0
+* **Clear Log Function:** Added a UI button to clear the console output.
