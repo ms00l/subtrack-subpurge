@@ -8,6 +8,29 @@ from tkinter import ttk, filedialog, scrolledtext, messagebox
 from pathlib import Path
 import sv_ttk
 
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tooltip_window = None
+        self.widget.bind("<Enter>", self.show_tooltip)
+        self.widget.bind("<Leave>", self.hide_tooltip)
+
+    def show_tooltip(self, event=None):
+        x, y, cx, cy = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = ttk.Label(tw, text=self.text, background="#333333", foreground="#ffffff", relief=tk.SOLID, borderwidth=1, padding=(5,2))
+        label.pack()
+
+    def hide_tooltip(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+    
 class SubpurgeApp:
     def __init__(self, root):
         self.root = root
@@ -25,6 +48,10 @@ class SubpurgeApp:
             self.mkvmerge_path = "mkvmerge"
 
         self.keep_langs_var = tk.StringVar(value="eng,und")
+        # protect_same_dir_var used for same folder checkbox
+        self.protect_same_dir_var = tk.BooleanVar(value=True)
+        self.input_dir.trace_add("write", self._toggle_overwrite_checkbox)
+        self.output_dir.trace_add("write", self._toggle_overwrite_checkbox)
         
         self.cancel_flag = threading.Event()
         self.current_process = None
@@ -41,6 +68,23 @@ class SubpurgeApp:
         main_frame = ttk.Frame(self.root, padding="20 20 20 20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # --- Instructions Frame ---
+        instructions_frame = ttk.LabelFrame(main_frame, text="How to Use Subtrack-Subpurge", padding="15 15 15 15")
+
+        instructions_frame.pack(fill=tk.X, pady=(0,20))
+
+        instructions_text = ("Subtrack-Subpurge is an automated batch tool that scans your MKV library and strips out unwanted "
+            "audio and subtitle tracks to save space.\n\n"
+            "Step 1: Select the Input Directory containing the files you want to scan.\n"
+            "Step 2: Select an Output Directory where the new, cleaned files will be saved.\n"
+            "Step 3: Define the 3-letter language codes you want to KEEP (e.g., eng, spa, jpn).\n"
+            "Step 4: Click 'Run Subtrack' to generate a queue of files that need cleaning.\n"
+            "Step 5: Click 'Run Subpurge' to execute the queue and strip the tracks."
+        )
+
+        ttk.Label(instructions_frame, text=instructions_text, font=default_font, justify=tk.LEFT, wraplength=800).pack(fill=tk.X)
+
+
         # --- Settings Frame ---
         settings_frame = ttk.LabelFrame(main_frame, text="Configuration", padding="15 15 15 15")
         settings_frame.pack(fill=tk.X, pady=(0, 15))
@@ -53,14 +97,23 @@ class SubpurgeApp:
         lang_entry.grid(row=2, column=1, pady=8, sticky=tk.EW)
         ttk.Label(settings_frame, text="(e.g., eng,und,jpn)", font=("Ubuntu", 9, "italic"), foreground="#888888").grid(row=2, column=2, padx=(15, 0), pady=8, sticky=tk.W)
 
+        self.protect_chk = ttk.Checkbutton(
+            settings_frame,
+            text="Keep original file?",
+            variable=self.protect_same_dir_var
+        )
+        # attaches tooltip for checkbox
+        ToolTip(self.protect_chk,"Checked: Saves as '_clean.mkv'. Unchecked: Overwrites original file.")
+        # no .grid() here _toggle_overwrite_checkbox auto grids when i/o matches
+
         # --- Controls Frame ---
         controls_frame = ttk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, pady=(0, 15))
 
-        self.scan_btn = ttk.Button(controls_frame, text="1. Run Subtrack (Scan)", command=self.start_scan, cursor="hand2")
+        self.scan_btn = ttk.Button(controls_frame, text="Run Subtrack (Scan)", command=self.start_scan, cursor="hand2")
         self.scan_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.clean_btn = ttk.Button(controls_frame, text="2. Run Subpurge (Clean)", command=self.start_clean, state=tk.DISABLED, cursor="hand2")
+        self.clean_btn = ttk.Button(controls_frame, text="Run Subpurge (Clean)", command=self.start_clean, state=tk.DISABLED, cursor="hand2")
         self.clean_btn.pack(side=tk.LEFT, padx=(0, 10))
 
         self.cancel_btn = ttk.Button(controls_frame, text="Stop / Cancel", command=self.cancel_action, state=tk.DISABLED, cursor="hand2")
@@ -86,31 +139,34 @@ class SubpurgeApp:
         # Tab 2: Review Queue
         self.queue_tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.queue_tab, text="Review Queue")
-        
-        # NEW: Added an "include" column for checkboxes
+
+        # added an "include" column for checkboxes
         self.tree = ttk.Treeview(self.queue_tab, columns=("include", "file", "tracks"), show="headings", selectmode="browse")
         self.tree.heading("include", text="Include")
         self.tree.heading("file", text="File Name")
         self.tree.heading("tracks", text="Foreign Tracks Found")
-        
+
         self.tree.column("include", width=80, anchor=tk.CENTER)
         self.tree.column("file", width=400)
         self.tree.column("tracks", width=300)
-        self.tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # Bind a single mouse click to our custom toggle function
+        bottom_queue_frame = ttk.Frame(self.queue_tab)
+        bottom_queue_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(0,5))
+
+        ttk.Label(bottom_queue_frame, text="Click the [X] or [ ] to select/deselect files for purging.", font=("Ubuntu", 9, "italic")).pack(side=tk.LEFT)
+        self.toggle_all_btn = ttk.Button(bottom_queue_frame, text="Select / Deselect All", command=self.toggle_all, cursor="hand2")
+        self.toggle_all_btn.pack(side=tk.RIGHT)
+
+        self.tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10))
+
         self.tree.bind('<ButtonRelease-1>', self.toggle_selection)
-        
-        # Adding a quick instructions label
-        ttk.Label(self.queue_tab, text="Click the [X] or [ ] to select/deselect files for purging.", font=("Ubuntu", 9, "italic")).pack(side=tk.LEFT)
-
         # --- Progress Bar ---
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
         self.progress.pack(fill=tk.X)
 
         self.log("Welcome to Subtrack-Subpurge v1.2")
-        self.log("Select directories, set your keep languages, and click 'Run Subtrack'.\n" + "-" * 60)
+        self.log("Select directories, set your keep languages, any other settings, and click 'Run Subtrack'.\n" + "-" * 60)
 
     def _add_path_row(self, parent, label_text, string_var, row, font):
         ttk.Label(parent, text=label_text, font=font).grid(row=row, column=0, sticky=tk.W, pady=8, padx=(0, 15))
@@ -125,6 +181,31 @@ class SubpurgeApp:
         parent.columnconfigure(1, weight=1)
     
     # --- Helper Functions ---
+    def toggle_all(self):
+        children = self.tree.get_children()
+        if not children: 
+            return
+
+        # check if every item is currently checked
+        all_checked = all(self.tree.item(item, "values")[0] == "[X]" for item in children)
+
+        # if all_checked, uncheck them else check all
+        new_state = "[ ]" if all_checked else "[X]"
+        for item in children:
+            vals = list(self.tree.item(item, "values"))
+            vals[0] = new_state
+            self.tree.item(item, values=vals)
+
+    def _toggle_overwrite_checkbox(self, *args):
+        in_path = self.input_dir.get().strip()
+        out_path = self.output_dir.get().strip()
+
+        # if statement for comparing directories arent empty
+        if in_path and out_path and os.path.normpath(in_path) == os.path.normpath(out_path):
+            self.protect_chk.grid(row=3,column=0,columnspan=3,sticky=tk.W,pady=(8,0))
+        else:
+            # hides without destroying
+            self.protect_chk.grid_remove()
     def log(self, message):
         def update_text():
             self.console.config(state=tk.NORMAL)
@@ -295,6 +376,20 @@ class SubpurgeApp:
 
             self.log(f"Purging: {file.name}...")
             out_file = output_base_path / file.with_suffix('.mkv').name
+
+            # --- Overwrite if statement to delete original files regarding keep original files? checkbox
+            is_overwrite = False
+            if out_file.resolve() == file.resolve():
+                if self.protect_same_dir_var.get():
+                    # checkbox is CHECKED so keep original, append _clean
+                    out_file = output_base_path / f"{file.stem}_clean.mkv"
+                    self.log(f"  [INFO] Appending '_clean' to protect original file.")
+                else:
+                    # checkbox is UNCHECKED:
+                    out_file = output_base_path / f"{file.stem}_temp.mkv"
+                    is_overwrite = True
+                    self.log(f"  [INFO] Overwrite Mode: Processing to temp file...")
+
             out_file.parent.mkdir(parents=True, exist_ok=True)
 
             command = [
@@ -312,13 +407,34 @@ class SubpurgeApp:
                     if self.cancel_flag.is_set():
                         self.current_process.terminate()
                         self.log(f"  [ABORTED] {file.name} was killed mid-process.")
+                        # clean temp file if user hits cancel mid-overwrite
+                        if is_overwrite and out_file.exists():
+                            out_file.unlink()
                         break
                     time.sleep(0.5)
                 
                 if not self.cancel_flag.is_set():
-                    self.log(f"  [SUCCESS] Saved to -> {out_file.name}")
-                    self.root.after(0, lambda i=item_id: self.tree.delete(i))
-                
+                    # --- return code validation
+                    if self.current_process.returncode == 0:
+                        # if doing a true overwrite, swap the files
+                        if is_overwrite:
+                            try:
+                                file.unlink()
+                                out_file.rename(file)
+                                out_file = file
+                            except Exception as e:
+                                self.log(f"  [ERROR] Could not replace original file: {e}")
+                        self.log(f"  [SUCCESS] Saved to -> {out_file.name}")
+                        self.root.after(0, lambda i=item_id: self.tree.delete(i))
+                    else:
+                        # Catch MKVMerge errors
+                        _, stderr_data = self.current_process.communicate()
+                        err_msg = stderr_data.decode('utf-8', errors='ignore').strip() if stderr_data else "Unknown MKVToolNix error."
+                        self.log(f"  [ERROR] mkvmerge rejected {file.name}")
+                        self.log(f"         Reason: {err_msg}")
+                        if is_overwrite and out_file.exists():
+                            out_file.unlink() # Cleanup failed temp file
+                    
             except Exception as e:
                 self.log(f"  [ERROR] Failed to process {file.name}")
                 self.log(f"         Reason: {e}")
@@ -327,6 +443,7 @@ class SubpurgeApp:
 
         self.current_process = None
         self.log("\n--- SUBPURGE FINISHED ---\n")
+        messagebox.showinfo("Purge Complete", f"All {total_files} items purged successfully.")
         
         # Reset UI securely
         def final_reset():
