@@ -44,9 +44,23 @@ Launch the application from your terminal:
 ## ⚠️ Disclaimer
 While Subtrack-Subpurge is designed to be non-destructive by outputting to a new folder, always test batch automation tools on a small sample folder before pointing them at your entire media server!
 
+### ⚠️ Known Issues
+
+* **Duplicate Language Tags:** Subtrack-Subpurge strictly filters by the 3-letter language code. If a movie contains a main English track (`eng`) and an English Director's Commentary (`eng`), the app cannot distinguish between the two and will keep both. 
+* **The `und` (Undetermined) Trap:** By default, Subtrack-Subpurge keeps `eng,und` tracks. Because many release groups lazily leave foreign tracks unlabelled, they default to `und`. Subtrack-Subpurge will see these foreign tracks as "safe" and skip the file. 
+  * *Workaround:* Remove `und` from your keep list (just use `eng`), but **VERIFY YOUR FILES FIRST**, as some main English tracks are also lazily tagged as `und`.
+
 ## 📝 Changelog
 
-### v1.2.0 (Current)
+### v1.3.0 (Current)
+* **Smart Error Handling:** Subtrack-Subpurge now strictly validates MKVToolNix return codes. If a file fails to process, the app catches the abort and prints the exact system error to the log instead of a false success.
+* **Same-Folder Protection & True Overwrite:** Added a "Keep original file?" toggle. 
+  * When checked, the app automatically appends `_clean` to the new filename if the Input and Output directories match, preventing fatal overwrite crashes.
+  * When unchecked, the app performs a "True Overwrite" by rendering to a temporary file and safely swapping it with the original upon completion.
+* **Queue Management:** Added a "Select / Deselect All" smart toggle button to the Review Queue for easier bulk management.
+* **UI Enhancements:** Restored the Quick-Start instructions to the main configuration window and added a "Purge Complete" popup notification with an exact processed file count.
+
+### v1.2.0
 * **OS-Aware Pathing:** Added dynamic path detection so Subtrack-Subpurge automatically finds the correct `mkvmerge` directory whether running on Linux or Windows.
 * **Verbose Error Handling:** Un-hid the background exception blocks. If a file fails to process, the log now prints the exact system error instead of a generic failure message.
 * **Interactive Review Queue:** Replaced the text-file queue with a tabbed GUI interface. Users can now visually review flagged files and use checkboxes `[X]` to include or exclude specific movies before purging.
@@ -55,3 +69,7 @@ While Subtrack-Subpurge is designed to be non-destructive by outputting to a new
 
 ### v1.1.0
 * **Clear Log Function:** Added a UI button to clear the console output.
+
+### Future Roadmap
+
+* *All v1.3.0 roadmap features have been successfully implemented! Open to suggestions for v1.4.0.*
