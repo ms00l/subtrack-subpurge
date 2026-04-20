@@ -11,6 +11,7 @@ import json
 import subprocess
 import threading
 import time
+import shutil
 
 """
 GUI & Filesystem imports here
@@ -80,6 +81,8 @@ class SubpurgeApp:
         else:
             self.mkvmerge_path = "mkvmerge"
 
+        self._verify_mkvmerge()
+
         # default languages user wants to keep
         self.keep_langs_var = tk.StringVar(value="eng,und")
         # protect_same_dir_var used for same folder checkbox
@@ -106,6 +109,27 @@ class SubpurgeApp:
         # build the UI and set the theme
         self._build_ui()
         sv_ttk.set_theme("dark")
+    
+    def _verify_mkvmerge(self):
+        """Check to see if mkvmerge exists. If not, prompts the user to find it."""
+        # checking if the path exists or its in the system path
+        if not Path(self.mkvmerge_path).exists() and not shutil.which(self.mkvmerge_path):
+            messagebox.showwarning(
+                "MKVToolNix Missing",
+                "Could not find mkvmerge.exe in the default location. \n\nPlease locate it manually."
+            )
+            # open file browser targeting executables
+            custom_path = filedialog.askopenfilename(
+                title="Locate mkvmerge.exe",
+                filetypes=[("Executable Files", "*.exe")] if os.name == 'nt' else [("All Files", "*.*")]
+            )
+
+            if custom_path:
+                self.mkvmerge_path = os.path.normpath(custom_path)
+            else:
+                # if hitting cancel on file browser, shut down app
+                self.root.destroy()
+                exit()
     
     def _build_ui(self):
 
@@ -169,6 +193,15 @@ class SubpurgeApp:
         self.clear_btn = ttk.Button(controls_frame, text="Clear Log", command=self.clear_log, cursor="hand2")
         self.clear_btn.pack(side=tk.RIGHT)
 
+        # --- Progress Bar ---
+        # set up variable to track from 0.0 to 100.0 then creating and packing the visual loading bar (ttk.Progressbar)
+        self.progress_var = tk.DoubleVar()
+        self.progress = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
+        self.progress.pack(fill=tk.X)
+        # just some welcome text into the console log provided to user (tab 1)
+        self.log("Welcome to Subtrack-Subpurge v1.3")
+        self.log("Select directories, set your keep languages, any other settings, and click 'Run Subtrack'.\n" + "-" * 60)
+
         # --- Tabbed Interface ---
         # creating Notebook widget allows clickable tabs
         self.notebook = ttk.Notebook(main_frame)
@@ -209,16 +242,6 @@ class SubpurgeApp:
         self.tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10))
         # binding the select all button to toggle function
         self.tree.bind('<ButtonRelease-1>', self.toggle_selection)
-
-
-        # --- Progress Bar ---
-        # set up variable to track from 0.0 to 100.0 then creating and packing the visual loading bar (ttk.Progressbar)
-        self.progress_var = tk.DoubleVar()
-        self.progress = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
-        self.progress.pack(fill=tk.X)
-        # just some welcome text into the console log provided to user (tab 1)
-        self.log("Welcome to Subtrack-Subpurge v1.3")
-        self.log("Select directories, set your keep languages, any other settings, and click 'Run Subtrack'.\n" + "-" * 60)
 
     # Helper function for I/O directory rows
     def _add_path_row(self, parent, label_text, string_var, row, font):
@@ -481,6 +504,37 @@ class SubpurgeApp:
                 self.log(f"  [SKIPPED] File missing: {file.name}")
                 continue
             self.log(f"Purging: {file.name}...")
+
+            # no audio track prevent check here
+            safe_languages = {lang.strip().lower for lang in raw_langs.split(',')}
+            try:
+                # running JSON check
+                check_cmd = [self.mkvmerge_path, "-J", str(file)]
+                cflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                check_process = subprocess.Popen(check_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=cflags)
+                stdout, _ = check_process.communicate()
+
+                if check_process.returncode == 0:
+                    media_info = json.loads(stdout)
+                    safe_audio_count = 0
+
+                    # count how many audio tracks match users keep list
+                    for track in media_info.get("tracks", []):
+                        if track.get("type") == "audio":
+                            lang = track.get("properties", {}).get("language", "und")
+                            if lang in safe_languages:
+                                safe_audio_count += 1
+                    
+                    # if purging would leave 0 audio tracks this is the abort
+                    if safe_audio_count == 0:
+                        self.log(f"  [ERROR] Aborted: Purging would leave this file with 0 audio tracks!")
+                        # set uncheck in the review queue
+                        self.root.after(0, lambda i=item_id: self.tree.set(i, "include", "[ ]"))
+                        continue
+            except Exception as e:
+                self.log(f"  [ERROR] Pre-check failed: {e}")
+                continue
+
             # predict the new file name/automatically converting to mkv
             out_file = output_base_path / file.with_suffix('.mkv').name
 
