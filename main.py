@@ -193,11 +193,16 @@ class SubpurgeApp:
         self.clear_btn = ttk.Button(controls_frame, text="Clear Log", command=self.clear_log, cursor="hand2")
         self.clear_btn.pack(side=tk.RIGHT)
 
-        # --- Progress Bar ---
+        # --- Progress Bar & storage savings ---
         # set up variable to track from 0.0 to 100.0 then creating and packing the visual loading bar (ttk.Progressbar)
         self.progress_var = tk.DoubleVar()
         self.progress = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
         self.progress.pack(fill=tk.X)
+
+        # UI label for savings tracker
+        self.savings_var = tk.StringVar(value="Total space saved: 0.00 MB")
+        ttk.Label(main_frame, textvariable=self.savings_var, font=("Ubuntu", 10, "bold"), foreground="#4CAF50").pack(side=tk.BOTTOM, pady=(10,0))
+
         # just some welcome text into the console log provided to user (tab 1)
         self.log("Welcome to Subtrack-Subpurge v1.3")
         self.log("Select directories, set your keep languages, any other settings, and click 'Run Subtrack'.\n" + "-" * 60)
@@ -474,6 +479,7 @@ class SubpurgeApp:
 
     def _clean_process(self):
         self.log("--- STARTING SUBPURGE ---")
+        self.total_saved_bytes = 0
         # create output dir if doesnt exist
         output_base_path = Path(self.output_dir.get())
         output_base_path.mkdir(parents=True, exist_ok=True)
@@ -555,6 +561,7 @@ class SubpurgeApp:
                     self.log(f"  [INFO] Overwrite Mode: Processing to temp file...")
 
             out_file.parent.mkdir(parents=True, exist_ok=True)
+            original_size = file.stat().st_size
             # building command array for mkvmerge
             command = [
                 self.mkvmerge_path,
@@ -594,6 +601,19 @@ class SubpurgeApp:
                             except Exception as e:
                                 self.log(f"  [ERROR] Could not replace original file: {e}")
                         self.log(f"  [SUCCESS] Saved to -> {out_file.name}")
+
+                        # calculate the space saved
+                        new_size = out_file.stat().st_size
+                        saved = original_size - new_size
+
+                        if saved > 0:
+                            self.total_saved_bytes += saved
+
+                            if self.total_saved_bytes > 1024**3:
+                                display_txt = f"Total space saved: {self.total_saved_bytes/(1024**3):.2f} GB"
+                            else:
+                                display_txt = f"Total space saved: {self.total_saved_bytes/(1024**2):.2f} MB"
+                            self.root.after(0, lambda d=display_txt: self.savings_var.set(d))
                         # remove file from review queue
                         self.root.after(0, lambda i=item_id: self.tree.delete(i))
                     # if return code is NOT 0, something is broken
