@@ -16,11 +16,13 @@ import shutil
 """
 GUI & Filesystem imports here
     -tkinter for core of the GUI and then its specific UI widgets
+    -tkinterdnd2 for drag and drop of folders to i/o boxes
     -pathlib for handling file paths
     -custom sun valley theme because im a dark mode kind of guy
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
+from tkinterdnd2 import TkinterDnD, DND_FILES
 from pathlib import Path
 import sv_ttk
 
@@ -253,6 +255,12 @@ class SubpurgeApp:
         ttk.Label(parent, text=label_text, font=font).grid(row=row, column=0, sticky=tk.W, pady=8, padx=(0, 15))
         entry = ttk.Entry(parent, textvariable=string_var, width=50, font=font)
         entry.grid(row=row, column=1, pady=8, sticky=tk.EW)
+
+        # enabling drag and drop
+        # Enable Drag & Drop
+        entry.drop_target_register(DND_FILES)
+        is_output = (label_text == "Output Directory:")
+        entry.dnd_bind('<<Drop>>', lambda e, var=string_var, out=is_output: self._handle_drop(e, var, out))
         
         # function for opening a file browser dialog
         def browse():
@@ -264,6 +272,19 @@ class SubpurgeApp:
         # text box stretches if window gets resized
         parent.columnconfigure(1, weight=1)
     
+    def _handle_drop(self, event, string_var, is_output):
+        """Processes dragged items. Input accepts anything, Output requires a single folder."""
+        if is_output:
+            # Output destination MUST be a single directory, stripping for empty space on windows
+            clean_path = event.data.strip('{}')
+            if Path(clean_path).is_dir():
+                string_var.set(os.path.normpath(clean_path))
+            else:
+                self.log("[WARNING] Output destination must be a single folder.")
+        else:
+            # else user wants to drag and drop multiple selected files and folders
+            string_var.set(event.data)
+
     def toggle_all(self):
         # get all rows (children) in treeview spreadsheet
         children = self.tree.get_children()
@@ -386,8 +407,7 @@ class SubpurgeApp:
     def _scan_process(self):
         # creating the reporting directory in case it doesnt exist
         self.tracking_dir.mkdir(parents=True, exist_ok=True)
-        # turn string path into a real Path obj
-        input_path = Path(self.input_dir.get())
+        
         # define file types to look at
         # FIXME und, avi, and unintentionally creating silent mkvs
         video_extensions = {".mkv", ".mp4", ".avi"}
@@ -400,15 +420,36 @@ class SubpurgeApp:
 
         self.log(f"--- STARTING SUBTRACK SCAN ---")
         
-        # use rglob to recursively find every file in the folder and its subfolders
-        all_files = list(input_path.rglob("*"))
+        # get the raw string from the input box which might contain multiple paths
+        raw_input = self.input_dir.get()
+        if not raw_input:
+            self.log("[WARNING] Input directory is empty.")
+            return
+
+        # tk.splitlist breaks apart the payload string into a usable list of paths
+        input_paths = self.root.tk.splitlist(raw_input)
+        self.log(f"  [INFO] Processing {len(input_paths)} input location(s)...")
+
+        # loop through everything dropped and extract the files into a single master list
+        all_files = []
+        for path_str in input_paths:
+            path_obj = Path(path_str)
+            if path_obj.is_file():
+                all_files.append(path_obj)
+            elif path_obj.is_dir():
+                all_files.extend(list(path_obj.rglob("*")))
+
+        # filter the master list down to just our specific video files
+        video_files = [f for f in all_files if f.suffix.lower() in video_extensions]
+        
         # count how many of those files are actually video file types program designed to care about
-        total_files = len([f for f in all_files if f.suffix.lower() in video_extensions])
+        total_files = len(video_files)
+
         processed_count = 0
         files_found_count = 0
 
         # loop through every file found
-        for file in all_files:
+        for file in video_files:
             # if user hits cancel, break loop
             if self.cancel_flag.is_set(): break
 
@@ -459,7 +500,7 @@ class SubpurgeApp:
         self.current_process = None
         self.log(f"\n--- SCAN COMPLETE ---")
         self.root.after(0, lambda: self.on_scan_complete(files_found_count))
-    
+
     # ==========================================
     # PHASE 2: SUBPURGE (CLEANING)
     # ==========================================
@@ -512,7 +553,7 @@ class SubpurgeApp:
             self.log(f"Purging: {file.name}...")
 
             # no audio track prevent check here
-            safe_languages = {lang.strip().lower for lang in raw_langs.split(',')}
+            safe_languages = {lang.strip().lower() for lang in raw_langs.split(',')}
             try:
                 # running JSON check
                 check_cmd = [self.mkvmerge_path, "-J", str(file)]
@@ -648,6 +689,6 @@ class SubpurgeApp:
         self.root.after(0, final_reset)
 
 if __name__ == "__main__":
-    root = tk.Tk() # initialize tkinter
+    root = TkinterDnD.Tk() # initialize tkinterDnD
     app = SubpurgeApp(root) # pass it to class
     root.mainloop() # start infinite loop that listens to mouse clicks
