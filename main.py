@@ -14,11 +14,11 @@ import time
 import shutil
 
 """
-GUI & Filesystem imports here
-    -tkinter for core of the GUI and then its specific UI widgets
-    -tkinterdnd2 for drag and drop of folders to i/o boxes
-    -pathlib for handling file paths
-    -custom sun valley theme because im a dark mode kind of guy
+    GUI & Filesystem imports here
+        -tkinter for core of the GUI and then its specific UI widgets
+        -tkinterdnd2 for drag and drop of folders to i/o boxes
+        -pathlib for handling file paths
+        -custom sun valley theme because im a dark mode kind of guy
 """
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
@@ -86,7 +86,7 @@ class SubpurgeApp:
         self._verify_mkvmerge()
 
         # default languages user wants to keep
-        self.keep_langs_var = tk.StringVar(value="eng,und")
+        self.keep_langs_var = tk.StringVar(value="")
         # protect_same_dir_var used for same folder checkbox
         self.protect_same_dir_var = tk.BooleanVar(value=True)
         
@@ -94,6 +94,11 @@ class SubpurgeApp:
         self.input_dir.trace_add("write", self._toggle_overwrite_checkbox)
         self.output_dir.trace_add("write", self._toggle_overwrite_checkbox)
         
+        # everytime these variables change, trigger a config save
+        self.input_dir.trace_add("write", self._save_config)
+        self.output_dir.trace_add("write", self._save_config)
+        self.keep_langs_var.trace_add("write", self._save_config)
+
         # threading.Event used to stop background loops if set to True
         # then using a variable to keep track of whatever subprocess is running
         self.cancel_flag = threading.Event()
@@ -111,6 +116,9 @@ class SubpurgeApp:
         # build the UI and set the theme
         self._build_ui()
         sv_ttk.set_theme("dark")
+
+        # loading config file if present
+        self._load_config()
     
     def _verify_mkvmerge(self):
         """Check to see if mkvmerge exists. If not, prompts the user to find it."""
@@ -132,9 +140,35 @@ class SubpurgeApp:
                 # if hitting cancel on file browser, shut down app
                 self.root.destroy()
                 exit()
-    
-    def _build_ui(self):
+    def _load_config(self):
+        """function to load user preferences from config.json if it exists"""
+        config_path = Path("config.json")
+        if config_path.exists():
+            try:
+                with open(config_path, "r") as f:
+                    data = json.load(f)
+                    # set variables if they exist
+                    if "input_dir" in data: self.input_dir.set(data["input_dir"])
+                    if "output_dir" in data: self.output_dir.set(data["output_dir"])
+                    if "keep_langs" in data: self.keep_langs_var.set(data["keep_langs"])
+            except Exception as e:
+                print(f"Failed to load config: {e}")
 
+    def _save_config(self, *args):
+        """saves current prefs to config.json on change"""
+        config_path = Path("config.json")
+        data = {
+            "input_dir": self.input_dir.get(),
+            "output_dir": self.output_dir.get(),
+            "keep_langs": self.keep_langs_var.get()
+        }
+        try:
+            with open(config_path, "w") as f:
+                json.dump(data, f, indent=4)
+        except Exception:
+            pass # fail silently to avoid crash
+        
+    def _build_ui(self):
         # set the font and create the main container frame 
         default_font = ("Ubuntu", 10)
         main_frame = ttk.Frame(self.root, padding="20 20 20 20")
@@ -224,6 +258,11 @@ class SubpurgeApp:
             insertbackground="white", relief=tk.FLAT, padx=10, pady=10
         )
         self.console.pack(fill=tk.BOTH, expand=True)
+        # binding middle mouse for scrolling
+        self.console.bind('<Button-2>', self._start_middle_scroll)
+        self.console.bind('<B2-Motion>', self._middle_scroll)
+        self.console.bind('<ButtonRelease-2>', self._stop_middle_scroll)
+    
 
         # Tab 2: Review Queue
         # this tab is for users who want to go through and check for specific files
@@ -247,8 +286,12 @@ class SubpurgeApp:
         self.toggle_all_btn.pack(side=tk.RIGHT)
         # packing Treeview to take all remaining space above the bottom frame
         self.tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(0, 10))
-        # binding the select all button to toggle function
+        # binding the select all button to toggle function, middle scroll
         self.tree.bind('<ButtonRelease-1>', self.toggle_selection)
+        self.tree.bind('<Button-2>', self._start_middle_scroll)
+        self.tree.bind('<B2-Motion>', self._middle_scroll)
+        self.tree.bind('<ButtonRelease-2>', self._stop_middle_scroll)
+
 
     # Helper function for I/O directory rows
     def _add_path_row(self, parent, label_text, string_var, row, font):
@@ -331,6 +374,29 @@ class SubpurgeApp:
         self.console.config(state=tk.NORMAL)
         self.console.delete(1.0, tk.END)
         self.console.config(state=tk.DISABLED)
+
+    def _start_middle_scroll(self, event):
+        """function for anchoring Y coord to middle mouse wheel"""
+        event.widget._scroll_y = event.y
+        self.root.config(cursor="sb_v_double_arrow")
+
+    def _middle_scroll(self, event):
+        """calculate mouse movement and scroll widget"""
+        if not hasattr(event.widget, '_scroll_y'):
+            return
+        
+        # calculate mouse drag
+        delta = event.widget._scroll_y - event.y
+
+        # add a 5 pixel deadzone, move the view up or down based on direction, then reset anchor
+        if abs(delta) > 5:
+            direction = -1 if delta > 0 else 1
+            event.widget.yview_scroll(direction, "units")
+            event.widget._scroll_y = event.y
+
+    def _stop_middle_scroll(self, event):
+        """function for resetting cursor when wheel released"""
+        self.root.config(cursor="")
 
     def toggle_selection(self, event):
         """Simulates a checkbox by toggling [X] and [ ] when the first column is clicked."""
@@ -542,7 +608,9 @@ class SubpurgeApp:
         raw_langs = self.keep_langs_var.get()
         if not raw_langs.strip(): raw_langs = "eng,und"
         mkvmerge_langs = ",".join([lang.strip().lower() for lang in raw_langs.split(",")])
-
+        successful_purges = 0
+        # storing strings for a final report
+        self.purge_results = []
         # loop through every flagged file, stopping if canceled and skipping file if missing
         for index, item_id in enumerate(files_to_process):
             if self.cancel_flag.is_set(): break
@@ -565,13 +633,26 @@ class SubpurgeApp:
                     media_info = json.loads(stdout)
                     safe_audio_count = 0
 
+                    # set track id vars
+                    default_audio_id = None
+                    default_sub_id = None
+
                     # count how many audio tracks match users keep list
                     for track in media_info.get("tracks", []):
-                        if track.get("type") == "audio":
-                            lang = track.get("properties", {}).get("language", "und")
-                            if lang in safe_languages:
+                        track_type = track.get("type")
+                        lang = track.get("properties", {}).get("language", "und")
+
+                        if lang in safe_languages:
+                            if track_type == "audio":
                                 safe_audio_count += 1
-                    
+                                # get id of the first safe audio track found
+                                if default_audio_id is None:
+                                    default_audio_id = track.get("id")
+                            elif track_type == "subtitles":
+                                # get id of the first safe subtitle track found
+                                if default_sub_id is None:
+                                    default_sub_id = track.get("id")
+
                     # if purging would leave 0 audio tracks this is the abort
                     if safe_audio_count == 0:
                         self.log(f"  [ERROR] Aborted: Purging would leave this file with 0 audio tracks!")
@@ -609,8 +690,14 @@ class SubpurgeApp:
                 "-o", str(out_file), # define output file
                 "--audio-tracks", mkvmerge_langs, # which audio to keeo
                 "--subtitle-tracks", mkvmerge_langs, # which subtitles to keep
-                str(file) # define input file
             ]
+
+            # set flags before input file is declared
+            if default_audio_id is not None:
+                command.extend(["--default-track", str(default_audio_id)])
+            if default_sub_id is not None:
+                command.extend(["--default-track", str(default_sub_id)])
+            command.append(str(file))
 
             try:
                 # launch command (using same os check in _scan_process) and while the command is running check if the user hit cancel
@@ -631,8 +718,16 @@ class SubpurgeApp:
                 
                 # if process finished without being cancelled
                 if not self.cancel_flag.is_set():
-                    # --- return code validation
-                    if self.current_process.returncode == 0:
+                    # capture terminal output for both success or error
+                    out_data, err_data = self.current_process.communicate()
+                    out_str = out_data.decode('utf-8', errors='ignore').strip() if out_data else ""
+                    err_str = err_data.decode('utf-8', errors='ignore').strip() if err_data else ""
+
+                    # --- return code validation, 0 is success, 1 is success with warnings
+                    if self.current_process.returncode in (0, 1):
+                        item_vals = self.tree.item(item_id, "values")
+                        removed_tracks_list = item_vals[2] if item_vals else "Unknown"
+                        
                         # if doing a true overwrite
                         if is_overwrite:
                             try:
@@ -640,8 +735,27 @@ class SubpurgeApp:
                                 out_file.rename(file) # rename the temp file to the og name
                                 out_file = file # update var for success log
                             except Exception as e:
-                                self.log(f"  [ERROR] Could not replace original file: {e}")
+                                self.log(f"  [ERROR] Could not replace original file: {e}")                        
                         self.log(f"  [SUCCESS] Saved to -> {out_file.name}")
+                        successful_purges += 1
+
+                        # grab foreign tracks string from treeview values
+                        self.purge_results.append({
+                            "file": file.name,
+                            "removed": removed_tracks_list
+                        })
+
+                        # returncode of 1 warning print
+                        if self.current_process.returncode == 1:
+                            full_output = out_str + "\n" + err_str
+                            # loop through terminal text and grab warning
+                            for line in full_output.split('\n'):
+                                if "Warning:" in line:
+                                    clean_warning = line.split("Warning:")[-1].strip()
+                                    # if check so long file paths dont clog live log
+                                    if clean_warning.startswith("'") and "': " in clean_warning:
+                                        clean_warning = clean_warning.split("': ")[-1].strip()
+                                    self.log(f"         [WARNING] {clean_warning}")
 
                         # calculate the space saved
                         new_size = out_file.stat().st_size
@@ -657,11 +771,9 @@ class SubpurgeApp:
                             self.root.after(0, lambda d=display_txt: self.savings_var.set(d))
                         # remove file from review queue
                         self.root.after(0, lambda i=item_id: self.tree.delete(i))
-                    # if return code is NOT 0, something is broken
-                    else:
-                        # Catch MKVMerge error text
-                        _, stderr_data = self.current_process.communicate()
-                        err_msg = stderr_data.decode('utf-8', errors='ignore').strip() if stderr_data else "Unknown MKVToolNix error."
+                    # if return code is NOT 0 or 1, something is broken
+                    else:                        
+                        err_msg = err_str if err_str else (out_str if out_str else "Unknown MKVToolNix error")
                         self.log(f"  [ERROR] mkvmerge rejected {file.name}")
                         self.log(f"         Reason: {err_msg}")
                         # delete any temp files that failed
@@ -676,7 +788,13 @@ class SubpurgeApp:
 
         self.current_process = None
         self.log("\n--- SUBPURGE FINISHED ---\n")
-        messagebox.showinfo("Purge Complete", f"All {total_files} items purged successfully.")
+        msg = f"{successful_purges} out of {total_files} items purged successfully."
+        if self.purge_results:
+            show_details = messagebox.askyesno("Purge Complete", f"{msg}\n\nWould you like to see what was purged?" )
+            if show_details:
+                self._show_summary_window()
+        else:
+            messagebox.showinfo("Purge Complete", msg)
         
         # Reset UI securely on the main thread
         def final_reset():
@@ -687,7 +805,32 @@ class SubpurgeApp:
             if self.tree.get_children():
                 self.clean_btn.config(state=tk.NORMAL)
         self.root.after(0, final_reset)
+    
+    def _show_summary_window(self):
+        """Function to create a separate window to show summary of tracks post-purge"""
+        summary_win = tk.Toplevel(self.root)
+        summary_win.title("Summary")
+        summary_win.geometry("600x400")
+        summary_win.transient(self.root)
 
+        # container frame
+        frame = ttk.Frame(summary_win, padding=15)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="The following tracks were successfully cleaned:", font=("Ubuntu", 10, "bold")).pack(anchor=tk.W, pady=(0,10))
+        
+        detail_box = scrolledtext.ScrolledText(frame, wrap=tk.WORD, font=("Consolas", 10), bg="#1c1c1c", fg="#e0e0e0")
+        detail_box.pack(fill=tk.BOTH, expand=True)
+
+        # populating the display
+        for res in self.purge_results:
+            detail_box.insert(tk.END, f"FILE: {res['file']}\n")
+            detail_box.insert(tk.END, f"CLEANED: {res['removed']}\n")
+            detail_box.insert(tk.END, "-" * 50 + "\n")
+        
+        detail_box.config(state=tk.DISABLED)
+        ttk.Button(frame, text="Close", command=summary_win.destroy).pack(pady=(10, 0))
+    
 if __name__ == "__main__":
     root = TkinterDnD.Tk() # initialize tkinterDnD
     app = SubpurgeApp(root) # pass it to class

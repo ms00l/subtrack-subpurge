@@ -12,6 +12,7 @@ dist/
 *.mp4
 *.srt
 *.spec
+*.json
 
 # Ignore Python cache
 __pycache__/
