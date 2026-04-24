@@ -240,7 +240,7 @@ class SubpurgeApp:
         ttk.Label(main_frame, textvariable=self.savings_var, font=("Ubuntu", 10, "bold"), foreground="#4CAF50").pack(side=tk.BOTTOM, pady=(10,0))
 
         # just some welcome text into the console log provided to user (tab 1)
-        self.log("Welcome to Subtrack-Subpurge v1.4")
+        self.log("Welcome to Subtrack-Subpurge v1.5")
         self.log("Select directories, set your keep languages, any other settings, and click 'Run Subtrack'.\n" + "-" * 60)
 
         # --- Tabbed Interface ---
